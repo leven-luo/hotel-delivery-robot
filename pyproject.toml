@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spill-free-delivery-rl"
+version = "0.1.0"
+description = "Active anti-spill tray for a delivery robot: optimal control vs reinforcement learning"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.3",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.7"]
+
+[tool.setuptools]
+packages = ["sim", "control", "rl"]
