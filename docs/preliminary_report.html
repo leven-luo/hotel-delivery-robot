@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <title>Project 5 — Preliminary Report</title>
 <style>
-  @page { size: Letter; margin: 0.6in 0.65in; }
-  body { font-family: "Times New Roman", Times, serif; font-size: 10.3pt; line-height: 1.28; color: #111; margin: 0; }
-  h1 { font-size: 14.5pt; margin: 0 0 2pt; text-align: center; }
-  .sub { text-align: center; font-size: 9.8pt; margin: 0 0 8pt; color: #333; }
-  h2 { font-size: 11pt; margin: 8pt 0 3pt; border-bottom: 0.6pt solid #999; padding-bottom: 1pt; }
-  p { margin: 0 0 4pt; text-align: justify; }
-  ul, ol { margin: 0 0 4pt; padding-left: 16pt; }
-  li { margin: 0 0 1.5pt; text-align: justify; }
-  table { border-collapse: collapse; margin: 3pt 0 5pt; font-size: 9.5pt; }
-  th, td { border: 0.6pt solid #888; padding: 1.5pt 5pt; text-align: left; }
+  @page { size: Letter; margin: 0.5in 0.55in; }
+  body { font-family: "Times New Roman", Times, serif; font-size: 9.8pt; line-height: 1.2; color: #111; margin: 0; }
+  h1 { font-size: 13.5pt; margin: 0 0 1pt; text-align: center; }
+  .sub { text-align: center; font-size: 9.3pt; margin: 0 0 5pt; color: #333; }
+  h2 { font-size: 10.6pt; margin: 6pt 0 2pt; border-bottom: 0.6pt solid #999; padding-bottom: 1pt; }
+  p { margin: 0 0 3pt; text-align: justify; }
+  ul, ol { margin: 0 0 3pt; padding-left: 15pt; }
+  li { margin: 0 0 1pt; text-align: justify; }
+  table { border-collapse: collapse; margin: 2pt 0 4pt; font-size: 9.1pt; }
+  th, td { border: 0.6pt solid #888; padding: 1pt 4pt; text-align: left; vertical-align: top; }
   th { background: #eee; }
   a { color: #0645ad; text-decoration: none; }
   .two { display: flex; gap: 14pt; }
@@ -32,15 +32,42 @@
 <p>The hotel map (corridors, doors, turns, intersections) is known, but whether a person steps out of a door or a blind corner is not: such events occur with location-dependent probabilities, and the policy only receives what its sensors could observe at that moment. Bumps and slippery patches add disturbances. The task combines <b>optimal control</b> (speed and tray commands jointly determine travel time and tipping risk along the whole trajectory) with <b>reinforcement learning</b> (acting under partial observability, e.g. learning where to slow down before doors without being told whether someone is behind them).</p>
 
 <h2>3. Tools</h2>
+<p><b>Simulator — written by us (Python/NumPy, Gymnasium API).</b> We use our own lightweight simulator rather than MuJoCo/PyBullet because it runs thousands of episodes per minute on a CPU and gives exact control over the quantities that matter here (actuator delays, event probabilities, partial observability). The contact between cup and tray only needs a tipping/sliding criterion, not a full contact solver. It models:</p>
 <ul>
-  <li><b>Simulator (our own, Python/NumPy):</b> car longitudinal and lateral dynamics with motor lag; servo model (delay, first-order lag, rate and angle limits); chassis tilt; a cup model on the tray. Wrapped as a <b>Gymnasium</b> environment so the same code serves the classical controllers and RL.</li>
-  <li><b>Learning:</b> <b>Stable-Baselines3</b> (SAC, PPO) on <b>PyTorch</b>; sb3-contrib for recurrent PPO. <b>Optimal control:</b> NumPy (LQR, feedforward) and <b>CasADi</b> (MPC).</li>
-  <li><b>Hardware (planned):</b> Waveshare UGV02 chassis (ESP32, 9-axis IMU, wheel encoders, 4 kg payload); a 3D-printed two-axis gimbal (fixed bracket, outer frame, food tray) with a DS3218 servo on one side of each axis and a 625ZZ bearing on the other; an ESP32 tray controller running the policy at 100 Hz; IMUs on the tray and inside the cup (ESP-NOW link) to detect tipping; a forward ToF sensor for bumps.</li>
+  <li><b>Car:</b> differential drive with first-order motor lag on speed and yaw rate, acceleration limits, wheel slip on wet patches, and vertical/pitch excitation from bumps through a second-order suspension.</li>
+  <li><b>Tray:</b> two servos with pure delay, first-order lag, rate limit and ±15° angle limit; chassis tilt from acceleration and bumps.</li>
+  <li><b>Cup</b> (rigid cylinder, base radius <i>r</i>, center-of-mass height <i>h</i>, friction μ). Let <i>f</i> = <i>g</i> − <i>a</i> be the specific force expressed in the tray frame, with components <i>f</i><sub>∥</sub> (in the tray plane) and <i>f</i><sub>⊥</sub> (normal to it). The cup <b>tips</b> if |<i>f</i><sub>∥</sub>|/<i>f</i><sub>⊥</sub> &gt; <i>r</i>/<i>h</i> for longer than a short dwell time, and <b>slides</b> if it exceeds μ. The tipping margin <i>m</i> = 1 − (|<i>f</i><sub>∥</sub>|/<i>f</i><sub>⊥</sub>)/(<i>r</i>/<i>h</i>) is used for logging and reward shaping. This criterion also tells us which cup to buy: <i>r</i>/<i>h</i> must make the cup tip within the car's reachable accelerations (≈1.5–3 m/s²).</li>
+  <li><b>Hotel map:</b> a graph of corridor segments with doors, turns and intersections. Pedestrians appear at doors and blind corners with location-dependent probabilities, and are visible only within the forward sensing range once not occluded.</li>
 </ul>
+<p><b>Existing code we reuse:</b> <b>Stable-Baselines3</b> and sb3-contrib (SAC, PPO, RecurrentPPO) on <b>PyTorch</b>; <b>Gymnasium</b>; <b>CasADi</b> with the IPOPT solver for MPC; <b>SciPy</b> (discrete Riccati equation) for LQR. <b>Written by us:</b> the simulator and environment, all baselines (feedforward, LQR and MPC formulations), training and evaluation scripts, ESP32 firmware and the dual-IMU tip detector.</p>
+<p><b>Hardware (planned).</b> Waveshare UGV02 chassis (ESP32, 9-axis IMU, wheel encoders, 4 kg payload); a 3D-printed two-axis gimbal (fixed bracket, outer frame, food tray) with a DS3218 servo on one side of each axis and a 625ZZ bearing on the other; an ESP32 tray controller running the policy; IMUs on the tray and inside the cup (ESP-NOW) to detect tipping; a forward ToF sensor for bumps.</p>
 
 <h2>4. Algorithms</h2>
-<p><b>Optimal-control baselines.</b> (i) <i>Fixed tray</i> with a constant or hand-tuned speed profile (lower bound). (ii) <i>Gravity-aligned feedforward</i>: tilt the tray to atan(<i>a</i>/<i>g</i>), using the planner's previewed acceleration to compensate servo lag. (iii) <i>LQR</i> for tray tilt around the linearized cup-on-tray dynamics. (iv) <i>MPC</i> over speed and tray angles that minimizes travel time subject to a no-tip constraint (relative acceleration below the cup's tipping threshold) and a stopping-distance constraint at every door and blind corner assuming a pedestrian may appear — safe but conservative.</p>
-<p><b>Reinforcement learning.</b> SAC/PPO with action = (speed command, tray pitch, tray roll). Reward: −<i>c</i> per time step, +<i>R</i> on arrival, −<i>R</i><sub>fail</sub> and episode end on tipping or collision. Partial observability is handled with a stacked observation history or a recurrent policy; the policy sees only map features and sensor readings, never the hidden event schedule. <i>Residual RL</i> learns a correction on top of the feedforward tray command (safer on hardware). A <i>curriculum</i> moves from a fixed route to randomized maps and events, with <i>domain randomization</i> of servo delay, cup mass and center-of-mass height, friction and sensor noise.</p>
+<p><b>MDP.</b> Control step 0.05 s (20 Hz), discount γ = 0.99. Episode ends on arrival, tipping, collision or timeout.</p>
+<table>
+  <tr><th style="width:17%">Element</th><th>Definition</th></tr>
+  <tr><td>Observation <i>o<sub>t</sub></i></td><td>Speed <i>v</i>; IMU acceleration (<i>a<sub>x</sub></i>, <i>a<sub>y</sub></i>, <i>a<sub>z</sub></i>) and yaw rate; tray pitch/roll; previous action. Map features: distance and type of the next door, turn or intersection; curvature ahead; distance to goal. Forward free-space range and an occlusion flag. The last <i>H</i> = 10 observations are stacked, or an LSTM is used.</td></tr>
+  <tr><td>Hidden from policy</td><td>Pedestrian schedule, wet patches and bump positions beyond sensor range, cup mass and center-of-mass height, servo parameters.</td></tr>
+  <tr><td>Action <i>a<sub>t</sub></i></td><td>Speed command <i>v</i><sub>cmd</sub> ∈ [0, 1.0] m/s; tray pitch and roll commands ∈ [−15°, 15°].</td></tr>
+  <tr><td>Reward <i>r<sub>t</sub></i></td><td>−<i>c</i><sub>t</sub>·Δ<i>t</i> − <i>w<sub>u</sub></i>‖<i>a<sub>t</sub></i> − <i>a</i><sub><i>t</i>−1</sub>‖² − <i>w<sub>m</sub></i>·max(0, <i>m</i><sub>0</sub> − <i>m<sub>t</sub></i>); +<i>R</i><sub>goal</sub> on arrival; −<i>R</i><sub>tip</sub> on tipping; −<i>R</i><sub>col</sub> on collision. Weights are tuned so that a failure costs more than any realistic time saving.</td></tr>
+</table>
+<p><b>Optimal-control baselines.</b></p>
+<ul>
+  <li><b>Fixed tray</b> with a constant speed and with a hand-tuned "slow near doors" profile (lower bounds).</li>
+  <li><b>Gravity-aligned feedforward</b> (already implemented): the tray target is the angle that aligns the cup with <i>g</i> − <i>a</i>, θ* = atan2(<i>a</i>, <i>g</i> + <i>a<sub>z</sub></i>) per axis. The acceleration is predicted 0.12 s ahead by passing the planner's commands through the motor-lag model, to compensate servo lag.</li>
+  <li><b>LQR tracking:</b> linearize servo and chassis-tilt dynamics. The state is the tray-angle error <i>e</i> = θ − θ* with its rate and the servo's internal states. Minimize Σ <i>e</i>ᵀ<i>Qe</i> + <i>u</i>ᵀ<i>Ru</i>, with the gain from the discrete Riccati equation, on top of the feedforward. This keeps the cup axis aligned with <i>g</i> − <i>a</i> despite servo lag.</li>
+  <li><b>MPC</b> (receding horizon, <i>N</i> = 20 steps = 2 s, CasADi/IPOPT, warm-started) over speed and tray angles. Cost: −progress + <i>w</i>‖Δ<i>u</i>‖². Constraints: car and servo dynamics and limits; no-tip |<i>f</i><sub>∥</sub>|/<i>f</i><sub>⊥</sub> ≤ κ·<i>r</i>/<i>h</i> with safety factor κ &lt; 1; and at every door or blind corner within the horizon, <i>v</i> ≤ √(2·<i>a</i><sub>brake</sub>·<i>d</i><sub>visible</sub>), i.e. the robot can always stop for a worst-case pedestrian. Safe by construction but conservative, which is the gap RL should close.</li>
+</ul>
+<p><b>Reinforcement learning.</b></p>
+<ul>
+  <li><b>SAC</b>: off-policy and sample-efficient for continuous actions; used with stacked observations.</li>
+  <li><b>PPO / RecurrentPPO (LSTM)</b>: handles partial observability through memory.</li>
+  <li><b>Residual RL</b> for the tray: θ<sub>cmd</sub> = θ*<sub>FF</sub> + 0.5·θ<sub>max</sub>·π<sub>tray</sub>(<i>o</i>). Speed is fully learned. This keeps the hardware safe early in training.</li>
+  <li><b>Curriculum</b> from a fixed route without pedestrians to randomized maps with rising pedestrian probability. The level increases automatically when the success rate exceeds 80%.</li>
+  <li><b>Domain randomization</b> of servo delay, time constant and rate; cup mass, <i>h</i> and <i>r</i>; friction μ; motor lag; IMU noise.</li>
+  <li><b>Optional DQN</b> with a discretized action set, as a link to the Q-learning covered in class.</li>
+  <li><b>Budget:</b> about one million environment steps per run, 3 seeds per method.</li>
+</ul>
 
 <h2>5. Planned work, experiments and expected results</h2>
 <p>All methods run on the same maps and event schedules. We report <b>success rate, tip rate, collision rate and mean time of successful episodes</b> (so that episodes that fail early do not look fast).</p>
