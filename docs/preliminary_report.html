@@ -16,8 +16,6 @@
   th, td { border: 0.6pt solid #888; padding: 1pt 4pt; text-align: left; vertical-align: top; }
   th { background: #eee; }
   a { color: #0645ad; text-decoration: none; }
-  .two { display: flex; gap: 14pt; }
-  .two > div { flex: 1; }
 </style>
 </head>
 <body>
@@ -28,80 +26,54 @@
 <p><a href="https://github.com/leven-luo/hotel-delivery-robot">https://github.com/leven-luo/hotel-delivery-robot</a> (public)</p>
 
 <h2>2. Project description</h2>
-<p>We build a hotel delivery robot that carries a tall cup on an actively tilting two-axis tray and must reach a guest room from the lobby as fast as possible without tipping the cup or colliding with people. The policy jointly controls <b>forward speed, tray pitch and tray roll</b>. Tilting the tray toward the effective gravity vector <i>g − a</i> lets the robot brake and turn harder than a fixed tray would allow.</p>
-<p>The hotel map (corridors, doors, turns, intersections) is known, but whether a person steps out of a door or a blind corner is not: such events occur with location-dependent probabilities, and the policy only receives what its sensors could observe at that moment. Bumps and slippery patches add disturbances. The task combines <b>optimal control</b> (speed and tray commands jointly determine travel time and tipping risk along the whole trajectory) with <b>reinforcement learning</b> (acting under partial observability, e.g. learning where to slow down before doors without being told whether someone is behind them).</p>
+<p>A hotel delivery robot must carry a drink from the lobby to a guest room quickly without spilling or knocking it over. Our robot carries the payload on a tray that can tilt in pitch and roll: tilting the tray toward the effective gravity vector <i>g − a</i> reduces the load on the payload during braking and turning. In our initial simulator, the vehicle followed prescribed speed profiles while the controller adjusted tray pitch and roll, and liquid slosh was evaluated with an equivalent-pendulum model. In the next stage, we plan to control vehicle speed and tray tilt jointly and evaluate whether a tall cup (about 330 mL) remains upright during delivery. This is a new evaluation target; spill results from the first stage are not tip-over rates.</p>
+<table>
+  <tr><th style="width:16%"></th><th style="width:42%">Simulator v0 (done)</th><th>Next stage (proposed)</th></tr>
+  <tr><td>Who controls what</td><td>Route and speed profile are prescribed; the controller sets tray pitch and roll.</td><td>The policy chooses target speed and both tray angles along a known route; a separate path follower handles steering.</td></tr>
+  <tr><td>Payload evaluation</td><td>Liquid surface tilt relative to the cup (pendulum model); spill when it exceeds a threshold.</td><td>Whether a tall cup tips over relative to the tray, and when it first tips; verified on hardware with cup and tray IMUs.</td></tr>
+  <tr><td>Route information</td><td>Controllers may read the prescribed speed commands ahead of time.</td><td>Door and intersection locations are known; sudden events (e.g., a person stepping out) enter the policy input only once they are observable.</td></tr>
+</table>
+<p>The problem combines optimal control (speed and tray commands jointly determine travel time and payload risk along the route) with reinforcement learning (acting on partial observations, e.g. deciding where to slow down without knowing whether someone is behind a door).</p>
 
 <h2>3. Tools</h2>
-<p><b>Simulator — written by us (Python/NumPy, Gymnasium API).</b> We use our own lightweight simulator rather than MuJoCo/PyBullet because it runs thousands of episodes per minute on a CPU and gives exact control over the quantities that matter here (actuator delays, event probabilities, partial observability). The contact between cup and tray only needs a tipping/sliding criterion, not a full contact solver. It models:</p>
-<ul>
-  <li><b>Car:</b> differential drive with first-order motor lag on speed and yaw rate, acceleration limits, wheel slip on wet patches, and vertical/pitch excitation from bumps through a second-order suspension.</li>
-  <li><b>Tray:</b> two servos with pure delay, first-order lag, rate limit and ±15° angle limit; chassis tilt from acceleration and bumps.</li>
-  <li><b>Cup</b> (rigid cylinder, base radius <i>r</i>, center-of-mass height <i>h</i>, friction μ). Let <i>f</i> = <i>g</i> − <i>a</i> be the specific force expressed in the tray frame, with components <i>f</i><sub>∥</sub> (in the tray plane) and <i>f</i><sub>⊥</sub> (normal to it). The cup <b>tips</b> if |<i>f</i><sub>∥</sub>|/<i>f</i><sub>⊥</sub> &gt; <i>r</i>/<i>h</i> for longer than a short dwell time, and <b>slides</b> if it exceeds μ. The tipping margin <i>m</i> = 1 − (|<i>f</i><sub>∥</sub>|/<i>f</i><sub>⊥</sub>)/(<i>r</i>/<i>h</i>) is used for logging and reward shaping. This criterion also tells us which cup to buy: <i>r</i>/<i>h</i> must make the cup tip within the car's reachable accelerations (≈1.5–3 m/s²).</li>
-  <li><b>Hotel map:</b> a graph of corridor segments with doors, turns and intersections. Pedestrians appear at doors and blind corners with location-dependent probabilities, and are visible only within the forward sensing range once not occluded.</li>
-</ul>
-<p><b>Existing code we reuse:</b> <b>Stable-Baselines3</b> and sb3-contrib (SAC, PPO, RecurrentPPO) on <b>PyTorch</b>; <b>Gymnasium</b>; <b>CasADi</b> with the IPOPT solver for MPC; <b>SciPy</b> (discrete Riccati equation) for LQR. <b>Written by us:</b> the simulator and environment, all baselines (feedforward, LQR and MPC formulations), training and evaluation scripts, ESP32 firmware and the dual-IMU tip detector.</p>
-<p><b>Hardware (planned).</b> Waveshare UGV02 chassis (ESP32, 9-axis IMU, wheel encoders, 4 kg payload); a 3D-printed two-axis gimbal (fixed bracket, outer frame, food tray) with a DS3218 servo on one side of each axis and a 625ZZ bearing on the other; an ESP32 tray controller running the policy; IMUs on the tray and inside the cup (ESP-NOW) to detect tipping; a forward ToF sensor for bumps.</p>
+<p><b>Existing code in the repository (Python/NumPy).</b> A simplified simulator, not a fluid or full contact simulation: servo dynamics (pure delay, first-order lag, rate and angle limits), chassis tilt from acceleration and bumps, the equivalent-pendulum slosh model, and a route generator (acceleration, braking, turns, speed bumps, with a curriculum level from a fixed route to random routes). It is wrapped as a <b>Gymnasium</b> environment running at 100 Hz with a ±20° tray limit. The repository also contains the reference baselines, an evaluation script, a training entry point for SAC/PPO from <b>Stable-Baselines3</b> (PyTorch), and unit tests with continuous integration. No training run has been completed yet.</p>
+<p><b>Planned.</b> Matplotlib for learning curves and result plots; simulator extensions for cup tipping and sliding, a speed action, and a simple corridor map with doors and stochastic pedestrians.</p>
+<p><b>Hardware (planned, candidates only; nothing has been purchased, assembled or tested yet).</b> A wheeled chassis with encoders and an IMU (candidate: Waveshare UGV02); a 3D-printed two-axis gimbal (fixed bracket, outer frame, food tray) driven by two hobby servos (candidate: DS3218) with bearings on the opposite side of each axis; an ESP32 tray controller; IMUs on the tray and inside the cup. The hardware control rate and tilt range will be set after system identification.</p>
 
 <h2>4. Algorithms</h2>
-<p><b>MDP.</b> Control step 0.05 s (20 Hz), discount γ = 0.99. Episode ends on arrival, tipping, collision or timeout.</p>
-<table>
-  <tr><th style="width:17%">Element</th><th>Definition</th></tr>
-  <tr><td>Observation <i>o<sub>t</sub></i></td><td>Speed <i>v</i>; IMU acceleration (<i>a<sub>x</sub></i>, <i>a<sub>y</sub></i>, <i>a<sub>z</sub></i>) and yaw rate; tray pitch/roll; previous action. Map features: distance and type of the next door, turn or intersection; curvature ahead; distance to goal. Forward free-space range and an occlusion flag. The last <i>H</i> = 10 observations are stacked, or an LSTM is used.</td></tr>
-  <tr><td>Hidden from policy</td><td>Pedestrian schedule, wet patches and bump positions beyond sensor range, cup mass and center-of-mass height, servo parameters.</td></tr>
-  <tr><td>Action <i>a<sub>t</sub></i></td><td>Speed command <i>v</i><sub>cmd</sub> ∈ [0, 1.0] m/s; tray pitch and roll commands ∈ [−15°, 15°].</td></tr>
-  <tr><td>Reward <i>r<sub>t</sub></i></td><td>−<i>c</i><sub>t</sub>·Δ<i>t</i> − <i>w<sub>u</sub></i>‖<i>a<sub>t</sub></i> − <i>a</i><sub><i>t</i>−1</sub>‖² − <i>w<sub>m</sub></i>·max(0, <i>m</i><sub>0</sub> − <i>m<sub>t</sub></i>); +<i>R</i><sub>goal</sub> on arrival; −<i>R</i><sub>tip</sub> on tipping; −<i>R</i><sub>col</sub> on collision. Weights are tuned so that a failure costs more than any realistic time saving.</td></tr>
-</table>
-<p><b>Optimal-control baselines.</b></p>
-<ul>
-  <li><b>Fixed tray</b> with a constant speed and with a hand-tuned "slow near doors" profile (lower bounds).</li>
-  <li><b>Gravity-aligned feedforward</b> (already implemented): the tray target is the angle that aligns the cup with <i>g</i> − <i>a</i>, θ* = atan2(<i>a</i>, <i>g</i> + <i>a<sub>z</sub></i>) per axis. The acceleration is predicted 0.12 s ahead by passing the planner's commands through the motor-lag model, to compensate servo lag.</li>
-  <li><b>LQR tracking:</b> linearize servo and chassis-tilt dynamics. The state is the tray-angle error <i>e</i> = θ − θ* with its rate and the servo's internal states. Minimize Σ <i>e</i>ᵀ<i>Qe</i> + <i>u</i>ᵀ<i>Ru</i>, with the gain from the discrete Riccati equation, on top of the feedforward. This keeps the cup axis aligned with <i>g</i> − <i>a</i> despite servo lag.</li>
-  <li><b>MPC</b> (receding horizon, <i>N</i> = 20 steps = 2 s, CasADi/IPOPT, warm-started) over speed and tray angles. Cost: −progress + <i>w</i>‖Δ<i>u</i>‖². Constraints: car and servo dynamics and limits; no-tip |<i>f</i><sub>∥</sub>|/<i>f</i><sub>⊥</sub> ≤ κ·<i>r</i>/<i>h</i> with safety factor κ &lt; 1; and at every door or blind corner within the horizon, <i>v</i> ≤ √(2·<i>a</i><sub>brake</sub>·<i>d</i><sub>visible</sub>), i.e. the robot can always stop for a worst-case pedestrian. Safe by construction but conservative, which is the gap RL should close.</li>
-</ul>
-<p><b>Reinforcement learning.</b></p>
-<ul>
-  <li><b>SAC</b>: off-policy and sample-efficient for continuous actions; used with stacked observations.</li>
-  <li><b>PPO / RecurrentPPO (LSTM)</b>: handles partial observability through memory.</li>
-  <li><b>Residual RL</b> for the tray: θ<sub>cmd</sub> = θ*<sub>FF</sub> + 0.5·θ<sub>max</sub>·π<sub>tray</sub>(<i>o</i>). Speed is fully learned. This keeps the hardware safe early in training.</li>
-  <li><b>Curriculum</b> from a fixed route without pedestrians to randomized maps with rising pedestrian probability. The level increases automatically when the success rate exceeds 80%.</li>
-  <li><b>Domain randomization</b> of servo delay, time constant and rate; cup mass, <i>h</i> and <i>r</i>; friction μ; motor lag; IMU noise.</li>
-  <li><b>Optional DQN</b> with a discretized action set, as a link to the Q-learning covered in class.</li>
-  <li><b>Budget:</b> about one million environment steps per run, 3 seeds per method.</li>
-</ul>
+<p><b>Reference baselines (implemented in v0).</b> (i) <i>Fixed tray</i>. (ii) <i>PID level-keeping</i>: the tray IMU angle is driven to zero. (iii) <i>Gravity feedforward</i>: the tray is tilted to θ* = atan2(<i>a</i>, <i>g</i> + <i>a<sub>z</sub></i>) per axis from measured acceleration, compensating chassis tilt. (iv) <i>Feedforward with 0.12 s preview</i>: the acceleration is predicted by passing the prescribed speed commands through a motor-lag model. In v0, preview uses commands that are known in advance; in joint control and on hardware, every method will receive only information available at decision time (never future pedestrian events), and all compared methods will receive the same information.</p>
+<p><b>Reinforcement learning (main method: SAC).</b> <i>Current task (v0, environment implemented, training pending):</i> the observation contains IMU acceleration, chassis tilt, measured tray angle, the previous action, the last four accelerations, and optionally 0.2 s of prescribed acceleration commands and the distance to the next bump. The action is tray pitch and roll, either directly (±20°) or as a <i>residual</i> added to the gravity feedforward, which gives a physics-based starting point but no safety guarantee. The reward is 1 − (20 θ² + 0.05 θ̇² + 0.5 ‖Δ<i>u</i>‖²) per step, where θ is the liquid tilt relative to the cup, with −100 and episode termination on a spill. Training uses an automatic curriculum (the route level is raised when the success rate exceeds 80%) and domain randomization of slosh frequency, damping and spill angle, servo lag, rate and delay, and chassis tilt. <i>Planned extension:</i> the action adds a target speed; the observation adds speed and observable map features (distance to the next door or intersection, visible free space); the reward becomes a time penalty per step, a bonus on arrival, large penalties on tip-over or collision, and a smoothness term. PPO is an optional comparison.</p>
+<p><b>Extension if time permits: MPC.</b> MPC would predict vehicle speed and tray motion over a 2 s horizon (40 steps of 0.05 s) and maximize progress minus a smoothness cost, subject to speed and tilt limits and a quasi-static no-tip constraint with margin. It would be compared with RL on the same routes and information. We claim no formal safety guarantee for any method; safety is evaluated through tip-over and collision rates.</p>
+<p><b>Tip-over criterion (planned).</b> As a simplified quasi-static criterion, the cup is at risk of tipping when the in-plane specific force exceeds <i>r</i>/<i>h</i> times the normal component (base radius over center-of-mass height). In reality a cup may slide first, or lift briefly and recover. On hardware, synchronized cup and tray IMUs will estimate the angle between the cup axis and the tray normal. The angle threshold and minimum duration will be calibrated on recordings of normal turns, bumps and actual tip-overs, and checked for false and missed detections. Detecting a tip-over is not the same as detecting a spill.</p>
 
 <h2>5. Planned work, experiments and expected results</h2>
-<p>All methods run on the same maps and event schedules. We report <b>success rate, tip rate, collision rate and mean time of successful episodes</b> (so that episodes that fail early do not look fast).</p>
 <ol>
-  <li><b>Active vs. fixed tray</b> at fixed speed profiles: tip rate as braking and cornering intensity increase.</li>
-  <li><b>Joint speed and tray control:</b> constant speed vs. MPC vs. RL vs. residual RL on randomized hotel maps with stochastic pedestrians.</li>
-  <li><b>Ablations:</b> acceleration preview on/off; recurrent vs. feed-forward policy; curriculum vs. training directly on random maps.</li>
-  <li><b>Hardware:</b> fixed tray vs. feedforward vs. learned policy on a taped-out corridor with doors and wooden bumps; tipping detected with the dual-IMU method.</li>
+  <li><b>Experiment 1 (priority): does active tray control help?</b> Same routes, speed profiles and physics; only the tray controller changes: fixed tray, gravity feedforward, feedforward with preview, and SAC or residual SAC once trained. Conditions: acceleration, braking, turning and speed bumps. Metrics: maximum liquid tilt, spill count and control effort in simulation. On hardware, if ready: tip-over counts for fixed vs. feedforward tray, with the sensor-based detection checked against labeled recordings.</li>
+  <li><b>Experiment 2 (extension): can joint control shorten delivery?</b> A 2 × 2 comparison of fixed or learned speed × fixed or active tray, on the same held-out routes and event seeds, with the same visible information, action limits and external protection rules. We will report the number of episodes, success rate, tip-over rate, collision rate and delivery time of successful episodes, interpreting time together with failure rates so that early failures do not look fast.</li>
 </ol>
-<p><b>Expected results.</b> The active tray should allow noticeably harder braking and cornering before the cup tips. Conservative MPC should be safe but slow; RL should keep speed on straight, visible corridors and slow down only before doors and blind corners, reaching shorter delivery times at a similar failure rate. The preview feedforward is a strong tray baseline, so RL's main gain is expected to come from speed decisions under partial observability.</p>
-<div class="two"><div>
+<p><b>Hypotheses.</b> We expect active tray control to reduce liquid slosh and tip-over during aggressive maneuvers. We will test whether joint control reduces delivery time at comparable tip-over and collision rates, and whether the learned policy slows down near blind doorways while keeping higher speeds in unobstructed corridors.</p>
 <table>
   <tr><th>Dates</th><th>Work</th></tr>
-  <tr><td>Nov 21–26</td><td>Cup-tipping model, speed action, hotel map in sim; order and assemble hardware</td></tr>
-  <tr><td>Nov 27–Dec 3</td><td>Train RL, implement MPC, first hardware runs; pre-report</td></tr>
-  <tr><td>Dec 4–9</td><td>Full experiments, ablations, demo video</td></tr>
+  <tr><td>Nov 22–26</td><td>First SAC training on v0; cup-tipping model and speed action in simulation; finalize and order parts</td></tr>
+  <tr><td>Nov 27–Dec 3</td><td>Experiment 1 in simulation; assemble the tray and identify servo and IMU parameters; pre-report</td></tr>
+  <tr><td>Dec 4–9</td><td>Hardware runs if ready; Experiment 2 if the joint-control environment is ready; demo video</td></tr>
   <tr><td>Dec 10 / 17</td><td>Presentation / final report</td></tr>
 </table>
-</div></div>
 
 <h2>6. Preliminary work done</h2>
 <ul>
-  <li><b>Simulator v0 and code base</b> (in the repository): servo model, chassis tilt, a liquid-slosh model of the cup, a route generator with turns, braking and speed bumps plus a curriculum level, a Gymnasium environment, the baselines, SAC/PPO training with an automatic curriculum, an evaluation script, unit tests and CI.</li>
-  <li><b>First baseline comparison in simulation</b> (benchmark route + 10 held-out random routes; maximum liquid tilt relative to the cup and spill rate). Keeping the tray level is no better than a fixed tray; aligning it with <i>g − a</i>, with preview to compensate servo lag, is what helps.
+  <li><b>Simulator v0 and code base</b> as described in Section 3, with unit tests for the slosh, servo and route models.</li>
+  <li><b>First reference-baseline comparison (simulated liquid slosh, not a cup tip-over test).</b> The second column is the maximum liquid tilt on one nominal benchmark route; the third column counts spills on 10 separate held-out random routes with randomized physics. A run stops at the first spill, so the maximum tilt of spilled runs is capped near the spill threshold. Ten routes is a small sample, and these numbers do not show that spills are eliminated in general. They were produced with <code>python -m rl.evaluate</code>.
     <table>
-      <tr><th>Controller</th><th>Benchmark max tilt</th><th>Held-out spill rate</th></tr>
-      <tr><td>Fixed tray</td><td>spills</td><td>100%</td></tr>
-      <tr><td>PID level-keeping</td><td>spills</td><td>100%</td></tr>
-      <tr><td>Gravity feedforward</td><td>8.5°</td><td>60%</td></tr>
-      <tr><td>Feedforward + 0.12 s preview</td><td>5.7°</td><td>0%</td></tr>
+      <tr><th>Controller</th><th>Max liquid tilt, benchmark route</th><th>Spills, 10 held-out routes</th></tr>
+      <tr><td>Fixed tray</td><td>12.2° (spilled)</td><td>10/10</td></tr>
+      <tr><td>PID level-keeping</td><td>12.0° (spilled)</td><td>10/10</td></tr>
+      <tr><td>Gravity feedforward</td><td>8.5°</td><td>6/10</td></tr>
+      <tr><td>Feedforward + 0.12 s preview</td><td>5.7°</td><td>0/10</td></tr>
     </table>
-  </li>
-  <li><b>Design decisions since v0:</b> the failure metric changed from spilled water to <b>cup tipping</b> (weighing during motion is corrupted by bumps and braking): a tall cup carries an IMU, and a tip is declared when its tilt relative to the tray IMU exceeds a calibrated threshold for a minimum duration. The task was extended from tray-only control to joint speed and tray control on a hotel map; simulator v0 is being extended accordingly.</li>
-  <li><b>Mechanical design and hardware selection:</b> 160 × 160 mm tray, ±15° per axis, servo-plus-bearing joint design, and a priced parts list.</li>
+    Keeping the tray level performed no better than a fixed tray; aligning it with <i>g</i> − <i>a</i>, with preview to compensate servo lag, helped. These results support further work on active tray control; tip-over rate, collision rate and delivery time still have to be measured.</li>
+  <li><b>No RL results yet:</b> the SAC/PPO training entry point exists, but no training run, learning curve or trained policy is reported here.</li>
+  <li><b>Design work (not built yet):</b> the tip-over detection method, the gimbal design and a candidate parts list.</li>
 </ul>
 </body>
 </html>
