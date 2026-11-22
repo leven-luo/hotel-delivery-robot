@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project 5 — Preliminary Report</title>
+<style>
+  @page { size: Letter; margin: 0.6in 0.65in; }
+  body { font-family: "Times New Roman", Times, serif; font-size: 10.3pt; line-height: 1.28; color: #111; margin: 0; }
+  h1 { font-size: 14.5pt; margin: 0 0 2pt; text-align: center; }
+  .sub { text-align: center; font-size: 9.8pt; margin: 0 0 8pt; color: #333; }
+  h2 { font-size: 11pt; margin: 8pt 0 3pt; border-bottom: 0.6pt solid #999; padding-bottom: 1pt; }
+  p { margin: 0 0 4pt; text-align: justify; }
+  ul, ol { margin: 0 0 4pt; padding-left: 16pt; }
+  li { margin: 0 0 1.5pt; text-align: justify; }
+  table { border-collapse: collapse; margin: 3pt 0 5pt; font-size: 9.5pt; }
+  th, td { border: 0.6pt solid #888; padding: 1.5pt 5pt; text-align: left; }
+  th { background: #eee; }
+  a { color: #0645ad; text-decoration: none; }
+  .two { display: flex; gap: 14pt; }
+  .two > div { flex: 1; }
+</style>
+</head>
+<body>
+<h1>Preliminary Report — Hotel Delivery Robot with an Active Two-Axis Tray</h1>
+<p class="sub">Project 5 · Reinforcement Learning and Optimal Control for Autonomous Systems I · November 2026</p>
+
+<h2>1. GitHub repository</h2>
+<p><a href="https://github.com/leven-luo/hotel-delivery-robot">https://github.com/leven-luo/hotel-delivery-robot</a> (public)</p>
+
+<h2>2. Project description</h2>
+<p>We build a hotel delivery robot that carries a tall cup on an actively tilting two-axis tray and must reach a guest room from the lobby as fast as possible without tipping the cup or colliding with people. The policy jointly controls <b>forward speed, tray pitch and tray roll</b>. Tilting the tray toward the effective gravity vector <i>g − a</i> lets the robot brake and turn harder than a fixed tray would allow.</p>
+<p>The hotel map (corridors, doors, turns, intersections) is known, but whether a person steps out of a door or a blind corner is not: such events occur with location-dependent probabilities, and the policy only receives what its sensors could observe at that moment. Bumps and slippery patches add disturbances. The task combines <b>optimal control</b> (speed and tray commands jointly determine travel time and tipping risk along the whole trajectory) with <b>reinforcement learning</b> (acting under partial observability, e.g. learning where to slow down before doors without being told whether someone is behind them).</p>
+
+<h2>3. Tools</h2>
+<ul>
+  <li><b>Simulator (our own, Python/NumPy):</b> car longitudinal and lateral dynamics with motor lag; servo model (delay, first-order lag, rate and angle limits); chassis tilt; a cup model on the tray. Wrapped as a <b>Gymnasium</b> environment so the same code serves the classical controllers and RL.</li>
+  <li><b>Learning:</b> <b>Stable-Baselines3</b> (SAC, PPO) on <b>PyTorch</b>; sb3-contrib for recurrent PPO. <b>Optimal control:</b> NumPy (LQR, feedforward) and <b>CasADi</b> (MPC).</li>
+  <li><b>Hardware (planned):</b> Waveshare UGV02 chassis (ESP32, 9-axis IMU, wheel encoders, 4 kg payload); a 3D-printed two-axis gimbal (fixed bracket, outer frame, food tray) with a DS3218 servo on one side of each axis and a 625ZZ bearing on the other; an ESP32 tray controller running the policy at 100 Hz; IMUs on the tray and inside the cup (ESP-NOW link) to detect tipping; a forward ToF sensor for bumps.</li>
+</ul>
+
+<h2>4. Algorithms</h2>
+<p><b>Optimal-control baselines.</b> (i) <i>Fixed tray</i> with a constant or hand-tuned speed profile (lower bound). (ii) <i>Gravity-aligned feedforward</i>: tilt the tray to atan(<i>a</i>/<i>g</i>), using the planner's previewed acceleration to compensate servo lag. (iii) <i>LQR</i> for tray tilt around the linearized cup-on-tray dynamics. (iv) <i>MPC</i> over speed and tray angles that minimizes travel time subject to a no-tip constraint (relative acceleration below the cup's tipping threshold) and a stopping-distance constraint at every door and blind corner assuming a pedestrian may appear — safe but conservative.</p>
+<p><b>Reinforcement learning.</b> SAC/PPO with action = (speed command, tray pitch, tray roll). Reward: −<i>c</i> per time step, +<i>R</i> on arrival, −<i>R</i><sub>fail</sub> and episode end on tipping or collision. Partial observability is handled with a stacked observation history or a recurrent policy; the policy sees only map features and sensor readings, never the hidden event schedule. <i>Residual RL</i> learns a correction on top of the feedforward tray command (safer on hardware). A <i>curriculum</i> moves from a fixed route to randomized maps and events, with <i>domain randomization</i> of servo delay, cup mass and center-of-mass height, friction and sensor noise.</p>
+
+<h2>5. Planned work, experiments and expected results</h2>
+<p>All methods run on the same maps and event schedules. We report <b>success rate, tip rate, collision rate and mean time of successful episodes</b> (so that episodes that fail early do not look fast).</p>
+<ol>
+  <li><b>Active vs. fixed tray</b> at fixed speed profiles: tip rate as braking and cornering intensity increase.</li>
+  <li><b>Joint speed and tray control:</b> constant speed vs. MPC vs. RL vs. residual RL on randomized hotel maps with stochastic pedestrians.</li>
+  <li><b>Ablations:</b> acceleration preview on/off; recurrent vs. feed-forward policy; curriculum vs. training directly on random maps.</li>
+  <li><b>Hardware:</b> fixed tray vs. feedforward vs. learned policy on a taped-out corridor with doors and wooden bumps; tipping detected with the dual-IMU method.</li>
+</ol>
+<p><b>Expected results.</b> The active tray should allow noticeably harder braking and cornering before the cup tips. Conservative MPC should be safe but slow; RL should keep speed on straight, visible corridors and slow down only before doors and blind corners, reaching shorter delivery times at a similar failure rate. The preview feedforward is a strong tray baseline, so RL's main gain is expected to come from speed decisions under partial observability.</p>
+<div class="two"><div>
+<table>
+  <tr><th>Dates</th><th>Work</th></tr>
+  <tr><td>Nov 21–26</td><td>Cup-tipping model, speed action, hotel map in sim; order and assemble hardware</td></tr>
+  <tr><td>Nov 27–Dec 3</td><td>Train RL, implement MPC, first hardware runs; pre-report</td></tr>
+  <tr><td>Dec 4–9</td><td>Full experiments, ablations, demo video</td></tr>
+  <tr><td>Dec 10 / 17</td><td>Presentation / final report</td></tr>
+</table>
+</div></div>
+
+<h2>6. Preliminary work done</h2>
+<ul>
+  <li><b>Simulator v0 and code base</b> (in the repository): servo model, chassis tilt, a liquid-slosh model of the cup, a route generator with turns, braking and speed bumps plus a curriculum level, a Gymnasium environment, the baselines, SAC/PPO training with an automatic curriculum, an evaluation script, unit tests and CI.</li>
+  <li><b>First baseline comparison in simulation</b> (benchmark route + 10 held-out random routes; maximum liquid tilt relative to the cup and spill rate). Keeping the tray level is no better than a fixed tray; aligning it with <i>g − a</i>, with preview to compensate servo lag, is what helps.
+    <table>
+      <tr><th>Controller</th><th>Benchmark max tilt</th><th>Held-out spill rate</th></tr>
+      <tr><td>Fixed tray</td><td>spills</td><td>100%</td></tr>
+      <tr><td>PID level-keeping</td><td>spills</td><td>100%</td></tr>
+      <tr><td>Gravity feedforward</td><td>8.5°</td><td>60%</td></tr>
+      <tr><td>Feedforward + 0.12 s preview</td><td>5.7°</td><td>0%</td></tr>
+    </table>
+  </li>
+  <li><b>Design decisions since v0:</b> the failure metric changed from spilled water to <b>cup tipping</b> (weighing during motion is corrupted by bumps and braking): a tall cup carries an IMU, and a tip is declared when its tilt relative to the tray IMU exceeds a calibrated threshold for a minimum duration. The task was extended from tray-only control to joint speed and tray control on a hotel map; simulator v0 is being extended accordingly.</li>
+  <li><b>Mechanical design and hardware selection:</b> 160 × 160 mm tray, ±15° per axis, servo-plus-bearing joint design, and a priced parts list.</li>
+</ul>
+</body>
+</html>
