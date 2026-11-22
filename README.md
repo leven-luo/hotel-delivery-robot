@@ -1,12 +1,33 @@
-# Spill-Free Delivery Robot (OC/RL course project)
+# Hotel Delivery Robot with an Active Two-Axis Tray
 
-A four-wheeled delivery robot carries a cup of water on an actively tilting tray.
-The car drives its route as usual; a controller decides, every 10 ms, how far to
-tilt the tray (pitch and roll) so the liquid does not slosh over the rim.
+NYU course project (Reinforcement Learning and Optimal Control for Autonomous
+Systems I), Project 5.
 
-We compare classical controllers (fixed tray, PID level-keeping, gravity
-feedforward, MPC) against reinforcement learning (SAC, residual RL with a physics
+A delivery robot carries a tall cup on an actively tilting two-axis tray and must
+reach a guest room from the hotel lobby as fast as possible without tipping the
+cup or colliding with people. The policy jointly controls **forward speed, tray
+pitch and tray roll**. The hotel map (corridors, doors, turns, intersections) is
+known, but whether a person steps out of a door or a blind corner is not: events
+occur with location-dependent probabilities and the policy only sees what its
+sensors could observe at that moment.
+
+We compare optimal-control baselines (fixed tray, gravity feedforward with
+preview, LQR, conservative MPC) against reinforcement learning (SAC/PPO,
+recurrent policies for partial observability, residual RL on top of the
 feedforward), first in simulation and then on real hardware.
+
+## Status
+
+| Part | State |
+| --- | --- |
+| Simulator v0 (this code) | Tray + servo + chassis-tilt dynamics, liquid-slosh cup model, route generator with bumps and curriculum, Gymnasium env, baselines, training/evaluation scripts, tests |
+| In progress | Cup-tipping model (tall cup, IMU-based tip detection), speed as an action, hotel map with stochastic pedestrians at doors and blind corners |
+| Hardware (planned) | Waveshare UGV02 chassis; 3D-printed gimbal (fixed bracket / outer frame / food tray), DS3218 servo + 625ZZ bearing per axis; ESP32 tray controller; IMUs on tray and inside the cup over ESP-NOW |
+
+The failure metric moved from spilled water to **cup tipping**: weighing during
+motion is corrupted by bumps and braking, so a tall cup carries an IMU and a tip
+is declared when its tilt relative to the tray IMU exceeds a calibrated threshold
+for a minimum duration.
 
 ## Key idea
 
@@ -17,10 +38,11 @@ gravity `g - a`, not to the cup. Tilting the tray to
 pitch = atan(a_x / g),   roll = atan(a_y / g)
 ```
 
-keeps the surface level relative to the cup. Servo lag, sensor noise, unknown
-fill level (slosh frequency) and speed bumps make this formula insufficient,
-which is where RL comes in: it can act on previewed speed commands before the
-car decelerates and learns to avoid exciting slosh resonance.
+keeps the cup aligned with the effective gravity, so the robot can brake and turn
+harder before the cup tips. Servo lag, sensor noise and bumps make this formula
+insufficient on its own, and it says nothing about *how fast* to drive. RL
+decides both: it keeps speed on straight, visible corridors and slows down before
+doors and blind corners, without being told whether someone is behind them.
 
 ## Repository layout
 
@@ -88,11 +110,14 @@ magnitude, and without preview in the ablation).
 
 | Deadline | Deliverable | Content |
 | --- | --- | --- |
-| Nov 19 | Preliminary report + this repo | Simulation v0, three baselines, first SAC learning curve |
-| Nov 26 | Internal checkpoint | Tray hardware tracks commanded angles; system identification fed back into sim |
-| Dec 3 | Pre-report | Residual RL, curriculum to random routes, first real-robot runs |
-| Dec 10 | Presentation | Full comparison on 5 benchmark + 2 held-out layouts, demo video |
-| Dec 17 | Final report | Analysis, ablations (preview length, curriculum), limitations |
+| Nov 19 | Preliminary report + this repo | Simulator v0, baselines, project plan |
+| Nov 26 | Internal checkpoint | Cup-tipping model, speed action, hotel map in sim; gimbal assembled and tracking commands |
+| Dec 3 | Pre-report | RL and MPC trained/implemented, first hardware runs |
+| Dec 10 | Presentation | Success / tip / collision rates and delivery time for all methods, demo video |
+| Dec 17 | Final report | Analysis, ablations (preview, recurrent policy, curriculum), limitations |
+
+Metrics: success rate, tip rate, collision rate, and mean time of successful
+episodes (so that early failures do not look fast).
 
 ## Team roles
 
